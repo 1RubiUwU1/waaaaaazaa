@@ -28,19 +28,13 @@ async function startBot() {
     auth: authState
   });
 
-  sock.ev.on("connection.update", (update) => {
-    const { connection, lastDisconnect, qr } = update;
+  sock.ev.on('connection.update', update => {
+  if (update.qr) {
+    // Guardar QR como imagen o mostrar en web, no en terminal si es un servidor
+    console.log('QR generado. Escanéalo desde otro dispositivo.');
+  }
+});
 
-    if (qr) qrcode.generate(qr, { small: true });
-
-    if (connection === "open") console.log("✅ Bot conectado.");
-    if (connection === "close") {
-      const code = lastDisconnect?.error?.output?.statusCode;
-      const reason = DisconnectReason[code] || code;
-      console.log(`❌ Conexión cerrada: ${reason}`);
-      if (reason !== "loggedOut") setTimeout(startBot, 5000);
-    }
-  });
 
   sock.ev.on("messages.upsert", ({ messages }) => {
     const msg = messages[0];
@@ -51,3 +45,4 @@ async function startBot() {
 }
 
 startBot();
+
