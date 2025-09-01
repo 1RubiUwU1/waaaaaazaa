@@ -1,37 +1,55 @@
-// bot.cjs
 const {
     default: makeWASocket,
     useMultiFileAuthState,
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
-    DisconnectReason
+    DisconnectReason,
+    downloadMediaMessage,
 } = require('@whiskeysockets/baileys');
 
 const P = require('pino');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const qrcode = require('qrcode-terminal');
 const { exec } = require('child_process');
-const express = require('express');
 
-const PORT = process.env.PORT || 8080;
-
-// Carpeta de credenciales locales
 const authFolder = './auth_info';
-if (!fs.existsSync(authFolder)) fs.mkdirSync(authFolder, { recursive: true });
+const error_img = path.join(__dirname, './assets/media/img/error.png'); // Ruta de imagen de error
 
-// Imagen de error
-const error_img = path.join(__dirname, './assets/media/img/error.png');
-
-async function sendErrorImage(sock, sender, msg, error, cmd) {
+var img_links = "https://raw.githubusercontent.com/skriftna/BOT/refs/heads/main/"
+// Función para enviar imagen de error
+function sendErrorImage(sock, sender, msg, error, cmd) {
     try {
         const imageBuffer = fs.readFileSync(error_img);
-        await sock.sendMessage(sender, {
+        sock.sendMessage(sender, {
             image: imageBuffer,
-            caption: `*|════| 𝐄𝐑𝐑𝐎𝐑 |════|*\n\n*🔑 CMD:*\n> ═> ${cmd || "N/A"}\n*📞 TRL:*\n> ═> ${error || "Error desconocido"}`
+            caption: `*|════| 𝐄𝐑𝐑𝐎𝐑 |════|*
+
+*🔑 CMD:*
+> ═> ${cmd}
+*📞 TRL:*
+> ═> ${error}`
         }, { quoted: msg });
     } catch (err) {
         console.error("❌ Error al enviar imagen de error:", err.message);
+    }
+}
+
+async function mensaje(comando, img, texto) {
+    const imageUrl = img;
+    try {
+        const imageRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+        const buffer = Buffer.from(imageRes.data, 'binary');
+
+        await sock.sendMessage(sender, {
+            image: buffer,
+            caption: texto,
+        }, { quoted: msg });
+
+        console.log("✅ comando: " + comando);
+    } catch (err){
+        console.error("❌ Error al enviar:", err.message);
     }
 }
 
@@ -42,31 +60,36 @@ async function startBot() {
     const sock = makeWASocket({
         version,
         logger: P({ level: 'silent' }),
-        printQRInTerminal: true,
+        printQRInTerminal: false,
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, P().child({ level: 'silent' })),
         },
     });
 
-    console.log("✅ Bot iniciado.");
-
-    // Conexión
+    // QR
     sock.ev.on("connection.update", (update) => {
-        const { connection, lastDisconnect, qr } = update;
+        const { connection, qr, lastDisconnect } = update;
 
-        if (connection === "open") console.log("✅ Conectado a WhatsApp.");
+        if (qr) {
+            console.log("📲 Escanea el código QR con WhatsApp:");
+            qrcode.generate(qr, { small: true });
+        }
+
+        if (connection === "open") {
+            console.log("✅ Bot conectado a WhatsApp.");
+        }
+
         if (connection === "close") {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
             console.log("❌ Conexión cerrada. ¿Reiniciar?", shouldReconnect);
-            if (shouldReconnect) setTimeout(startBot, 5000); // reconectar tras 5s
+            if (shouldReconnect) startBot();
         }
-        if (qr) console.log("📲 Escanea este QR en tu WhatsApp para iniciar sesión.");
     });
 
     sock.ev.on("creds.update", saveCreds);
 
-    // Mensajes
+    // Mensajes entrantes
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
         if (type !== "notify") return;
         const msg = messages[0];
@@ -78,64 +101,107 @@ async function startBot() {
 
         console.log(`📩 Mensaje de ${sender}: ${text}`);
 
-        // Comando !hola
         if (user === "!hola") {
-            const imageUrl = 'https://firebasestorage.googleapis.com/v0/b/fotos-b8a54.appspot.com/o/517410938_122175310514383922_6719064626741466107_n.jpg?alt=media';
+            const imageUrl = 'https://firebasestorage.googleapis.com/v0/b/fotos-b8a54.appspot.com/o/517410938_122175310514383922_6719064626741466107_n.jpg?alt=media&token=f3cd070e-46ec-48be-a7af-85f90b4729c8';
+
             try {
                 const imageRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-                await sock.sendMessage(sender, { image: Buffer.from(imageRes.data, 'binary'), caption: "----" }, { quoted: msg });
-            } catch (err) { sendErrorImage(sock, sender, msg, err.message, "!hola"); }
+                const buffer = Buffer.from(imageRes.data, 'binary');
+
+                await sock.sendMessage(sender, {
+                    image: buffer,
+                    caption: `----`,
+                }, { quoted: msg });
+
+                console.log("✅ Imagen y texto enviados correctamente.");
+            } catch (err) {
+                sendErrorImage(sock, sender, msg);
+            }
         }
 
-        // Comando !voz
+        // Comando: !voz
         if (user === "!voz") {
             try {
                 const audioPath = path.join(__dirname, 'audios', 'saludo.mp3');
                 const audioBuffer = fs.readFileSync(audioPath);
-                await sock.sendMessage(sender, { audio: audioBuffer, mimetype: 'audio/mp4', ptt: true }, { quoted: msg });
-            } catch (err) { sendErrorImage(sock, sender, msg, err.message, "!voz"); }
+
+                await sock.sendMessage(sender, {
+                    audio: audioBuffer,
+                    mimetype: 'audio/mp4',
+                    ptt: true
+                }, { quoted: msg });
+
+                console.log("✅ Audio enviado correctamente.");
+            } catch (err) {
+                sendErrorImage(sock, sender, msg);
+            }
         }
 
-        // Comando !encender
+        // Comando: !encender
         if (user === "!encender" || user === "!cargar") {
             exec('python assets/plugins/carga/encender.py', (err, stdout, stderr) => {
                 const salida = stdout.trim();
-                if (err || salida.startsWith("Error") || salida.includes("Error")) sendErrorImage(sock, sender, msg, salida, "!encender");
-                else sock.sendMessage(sender, { text: salida || "Sin salida." }, { quoted: msg });
+
+                if (err || salida.startsWith("Error") || salida.includes("Error")) {
+                    sendErrorImage(sock, sender, msg, stdout, "!encender");
+                } else {
+                    sock.sendMessage(sender, {
+                        text: salida || "Sin salida."
+                    }, { quoted: msg });
+                }
             });
         }
 
-        // Comando !apagar
+        // Comando: !apagar
         if (user === "!apagar") {
             exec('python assets/plugins/carga/apagar.py', (err, stdout, stderr) => {
                 const salida = stdout.trim();
-                if (err || salida.includes("Error")) sendErrorImage(sock, sender, msg, salida, "!apagar");
-                else sock.sendMessage(sender, { text: salida || "Sin salida." }, { quoted: msg });
+                if (err || salida === "Error") {
+                    sendErrorImage(sock, sender, msg);
+                } else {
+                    sock.sendMessage(sender, {
+                        text: salida || "Sin salida."
+                    }, { quoted: msg });
+                }
             });
         }
     });
 
     // Bienvenida a nuevos miembros
     sock.ev.on("group-participants.update", async (update) => {
-        const imageUrl = 'https://firebasestorage.googleapis.com/v0/b/fotos-b8a54.appspot.com/o/517410938_122175310514383922_6719064626741466107_n.jpg?alt=media';
+        const imageUrl = 'https://firebasestorage.googleapis.com/v0/b/fotos-b8a54.appspot.com/o/517410938_122175310514383922_6719064626741466107_n.jpg?alt=media&token=f3cd070e-46ec-48be-a7af-85f90b4729c8';
         const { id, participants, action } = update;
 
         if (action === 'add') {
             try {
                 const imageRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
                 const buffer = Buffer.from(imageRes.data, 'binary');
+
                 for (const user of participants) {
-                    await sock.sendMessage(id, { image: buffer, caption: `👋 ¡Bienvenido @${user.split('@')[0]}!`, mentions: [user] });
+                    await sock.sendMessage(id, {
+                        image: buffer,
+                        caption: `👋 ¡Bienvenido @${user.split('@')[0]} al grupo!`,
+                        mentions: [user],
+                    });
                 }
-            } catch (err) { console.error("❌ Error enviando bienvenida:", err.message); }
+            } catch (err) {
+                console.error("❌ Error al enviar imagen de bienvenida:", err.message);
+            }
         }
     });
 }
 
-// Express simple para Railway (keep alive)
-const app = express();
-app.get("/", (req, res) => res.send("🌐 Servidor activo"));
-app.listen(PORT, () => console.log(`🌐 Servidor HTTP activo en puerto ${PORT}`));
+async function main() {
+    while (true) {
+        try {
+            await startBot();
+            break;
+        } catch (err) {
+            console.error("❌ Error crítico:", err.message);
+            console.log("🔄 Reiniciando bot en 4 segundos...");
+            await new Promise(res => setTimeout(res, 4000));
+        }
+    }
+}
 
-// Ejecuta el bot
-startBot().catch(err => console.error("❌ Error crítico al iniciar el bot:", err));
+main();
