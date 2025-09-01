@@ -1,2 +1,2 @@
-[setup]
-node_version = "20"
+[phases.setup]
+nodejs = "20"
