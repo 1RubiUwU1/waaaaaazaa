@@ -1,16 +1,16 @@
-import makeWASocket, { fetchLatestBaileysVersion, DisconnectReason } from '@whiskeysockets/baileys';
+// bot.mjs
+import makeWASocket, {
+  fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
+  DisconnectReason
+} from '@whiskeysockets/baileys';
 import P from 'pino';
 import axios from 'axios';
 import qrcode from 'qrcode-terminal';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const firebaseBase = "https://firebasestorage.googleapis.com/v0/b/fotos-b8a54.appspot.com/o/auth_info%2F";
 
-// Lista de archivos de la sesión
+// Lista de archivos de sesión
 const sessionFiles = [
  "app-state-sync-key-AAAAAAol.json",
  "app-state-sync-version-critical_block.json",
@@ -145,76 +145,93 @@ const sessionFiles = [
 
 ];
 
-// Cargar credenciales desde Firebase en un objeto
+// Cargar sesión desde Firebase
 async function loadSessionFromFirebase() {
-    const state = {};
-    for (const file of sessionFiles) {
-        const url = `${firebaseBase}${encodeURIComponent(file)}?alt=media`;
-        try {
-            const res = await axios.get(url);
-            state[file.replace('.json','')] = res.data;
-        } catch (err) {
-            console.warn(`⚠️ No se pudo cargar ${file}: ${err.message}`);
-        }
+  const state = {};
+  for (const file of sessionFiles) {
+    const url = `${firebaseBase}${encodeURIComponent(file)}?alt=media`;
+    try {
+      const res = await axios.get(url);
+      state[file.replace('.json','')] = res.data;
+    } catch (err) {
+      console.warn(`⚠️ No se pudo cargar ${file}: ${err.message}`);
     }
-    return state;
+  }
+  return state;
 }
 
 // Guardar estado actualizado (opcional)
 async function saveStateToFirebase(state) {
-    console.log("💾 Aquí podrías subir cambios a Firebase si quieres.");
+  console.log("💾 Guardar credenciales actualizadas en Firebase si quieres.");
 }
 
+// Crear el bot
 async function startBot() {
-    const { version } = await fetchLatestBaileysVersion();
-    const authState = await loadSessionFromFirebase();
+  const { version } = await fetchLatestBaileysVersion();
+  const authState = await loadSessionFromFirebase();
 
-    const sock = makeWASocket({
-        version,
-        logger: P({ level: 'silent' }),
-        printQRInTerminal: false,
-        auth: authState
-    });
+  const sock = makeWASocket({
+    version,
+    logger: P({ level: 'silent' }),
+    printQRInTerminal: false,
+    auth: authState,
+    connectTimeoutMs: 60000  // 60s timeout
+  });
 
-    sock.ev.on("connection.update", async (update) => {
-        const { connection, lastDisconnect, qr } = update;
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, lastDisconnect, qr } = update;
 
-        if (qr) {
-            console.log("📲 Escanea este QR con WhatsApp:");
-            qrcode.generate(qr, { small: true });
-        }
+    if (qr) {
+      console.log("📲 Escanea este QR con WhatsApp:");
+      qrcode.generate(qr, { small: true });
+    }
 
-        if (connection === "open") console.log("✅ Bot conectado a WhatsApp.");
+    if (connection === "open") console.log("✅ Bot conectado a WhatsApp.");
 
-        if (connection === "close") {
-            const code = lastDisconnect?.error?.output?.statusCode;
-            const reason = DisconnectReason[code] || code;
-            console.log(`❌ Conexión cerrada: ${reason}`);
-            if (reason !== "loggedOut") startBot();
-        }
-    });
+    if (connection === "close") {
+      const code = lastDisconnect?.error?.output?.statusCode;
+      const reason = DisconnectReason[code] || code;
+      console.log(`❌ Conexión cerrada: ${reason}`);
+      if (reason !== "loggedOut") {
+        console.log("🔄 Intentando reconectar en 5s...");
+        setTimeout(startBot, 5000);
+      }
+    }
+  });
 
-    sock.ev.on("creds.update", async () => {
-        console.log("💾 Credenciales actualizadas.");
-        await saveStateToFirebase(sock.authState);
-    });
+  sock.ev.on("creds.update", async () => {
+    console.log("💾 Credenciales actualizadas.");
+    await saveStateToFirebase(sock.authState);
+  });
 
-    // Ejemplo de comando simple
-    sock.ev.on("messages.upsert", async ({ messages, type }) => {
-        if (type !== "notify") return;
-        const msg = messages[0];
-        if (!msg.message || msg.key.fromMe) return;
+  // Comandos simples
+  sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    if (type !== "notify") return;
+    const msg = messages[0];
+    if (!msg.message || msg.key.fromMe) return;
 
-        const sender = msg.key.remoteJid;
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+    const sender = msg.key.remoteJid;
+    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
 
-        console.log(`📩 Mensaje de ${sender}: ${text}`);
+    console.log(`📩 Mensaje de ${sender}: ${text}`);
 
-        if (text.toLowerCase() === "!hola") {
-            await sock.sendMessage(sender, { text: "¡Hola! 👋" }, { quoted: msg });
-        }
-    });
+    if (text.toLowerCase() === "!hola") {
+      await sock.sendMessage(sender, { text: "¡Hola! 👋" }, { quoted: msg });
+    }
+
+    // Ejemplo de comando con imagen
+    if (text.toLowerCase() === "!imagen") {
+      try {
+        const url = 'https://firebasestorage.googleapis.com/v0/b/fotos-b8a54.appspot.com/o/517410938_122175310514383922_6719064626741466107_n.jpg?alt=media';
+        const res = await axios.get(url, { responseType: 'arraybuffer' });
+        const buffer = Buffer.from(res.data, 'binary');
+        await sock.sendMessage(sender, { image: buffer, caption: "Imagen desde Firebase" }, { quoted: msg });
+      } catch (err) {
+        console.error("❌ Error al enviar imagen:", err.message);
+      }
+    }
+  });
 }
 
-// Iniciar bot
+// Arrancar bot
 startBot();
