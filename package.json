@@ -1,16 +1,15 @@
 {
   "name": "rubi-bot",
   "version": "1.0.0",
-  "type": "module",
+  "main": "bot.cjs",
+  "type": "commonjs",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node bot.cjs"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.19",
-    "node-fetch": "^3.3.2",
+    "axios": "^1.7.0",
+    "pino": "^8.0.0",
     "qrcode-terminal": "^0.12.0"
-  },
-  "engines": {
-    "node": ">=22.0.0"
   }
 }
