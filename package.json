@@ -2,6 +2,7 @@
   "name": "rubi-bot",
   "version": "1.0.0",
   "description": "Bot de WhatsApp usando Baileys y Firebase",
+  "type": "module",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
