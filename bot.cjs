@@ -1,11 +1,15 @@
-// bot.cjs
-const makeWASocket = require('@whiskeysockets/baileys').default;
+// ======================
+// BOT RUBI – Railway Ready
+// ======================
+
+// Dependencias
 const {
+    default: makeWASocket,
     useMultiFileAuthState,
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
     DisconnectReason,
-    downloadMediaMessage
+    downloadMediaMessage,
 } = require('@whiskeysockets/baileys');
 const P = require('pino');
 const axios = require('axios');
@@ -14,22 +18,31 @@ const path = require('path');
 const qrcode = require('qrcode-terminal');
 const { exec } = require('child_process');
 
-// Configuración
-const authFolder = './auth_info';
-const error_img = path.join(__dirname, './assets/media/error.png');
+// Express para mantener Railway activo
+const express = require('express');
+const app = express();
+app.get('/ping', (req, res) => res.send('✅ Bot activo'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`🌐 Servidor HTTP activo en puerto ${PORT}`));
 
-function sendErrorImage(sock, sender, msg, error = '', cmd = '') {
+// Carpeta de autenticación
+const authFolder = './auth_info';
+const error_img = path.join(__dirname, './assets/media/img/error.png');
+
+// Función para enviar imagen de error
+function sendErrorImage(sock, sender, msg, error, cmd) {
     try {
-        const buffer = fs.readFileSync(error_img);
+        const imageBuffer = fs.readFileSync(error_img);
         sock.sendMessage(sender, {
-            image: buffer,
-            caption: `*|════| 𝐄𝐑𝐑𝐎𝐑 |════|*\n\n*🔑 CMD:* ${cmd}\n*📞 TRL:* ${error}`
+            image: imageBuffer,
+            caption: `*|════| 𝐄𝐑𝐑𝐎𝐑 |════|*\n\n*🔑 CMD:* > ${cmd}\n*📞 TRL:* > ${error}`
         }, { quoted: msg });
     } catch (err) {
         console.error("❌ Error al enviar imagen de error:", err.message);
     }
 }
 
+// Función principal del bot
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState(authFolder);
     const { version } = await fetchLatestBaileysVersion();
@@ -37,22 +50,25 @@ async function startBot() {
     const sock = makeWASocket({
         version,
         logger: P({ level: 'silent' }),
-        printQRInTerminal: false,
+        printQRInTerminal: true,
         auth: {
             creds: state.creds,
-            keys: makeCacheableSignalKeyStore(state.keys, P().child({ level: 'silent' }))
-        }
+            keys: makeCacheableSignalKeyStore(state.keys, P().child({ level: 'silent' })),
+        },
     });
 
-    // Eventos de conexión
+    // QR y conexión
     sock.ev.on("connection.update", (update) => {
         const { connection, qr, lastDisconnect } = update;
+
         if (qr) qrcode.generate(qr, { small: true });
+
         if (connection === "open") console.log("✅ Bot conectado a WhatsApp.");
+
         if (connection === "close") {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
             console.log("❌ Conexión cerrada. ¿Reiniciar?", shouldReconnect);
-            if (shouldReconnect) setTimeout(startBot, 5000);
+            if (shouldReconnect) setTimeout(startBot, 10000); // 10 segundos antes de reconectar
         }
     });
 
@@ -72,11 +88,15 @@ async function startBot() {
 
         // Comando !hola
         if (user === "!hola") {
-            const imgURL = 'https://firebasestorage.googleapis.com/v0/b/fotos-b8a54.appspot.com/o/517410938_122175310514383922_6719064626741466107_n.jpg?alt=media';
+            const imageUrl = 'https://raw.githubusercontent.com/skriftna/BOT/main/assets/media/img/hola.jpg';
             try {
-                const res = await axios.get(imgURL, { responseType: 'arraybuffer' });
-                const buffer = Buffer.from(res.data, 'binary');
-                await sock.sendMessage(sender, { image: buffer, caption: "👋 Hola!" }, { quoted: msg });
+                const imageRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+                const buffer = Buffer.from(imageRes.data, 'binary');
+
+                await sock.sendMessage(sender, {
+                    image: buffer,
+                    caption: `👋 ¡Hola!`,
+                }, { quoted: msg });
             } catch (err) {
                 sendErrorImage(sock, sender, msg, err.message, "!hola");
             }
@@ -85,9 +105,14 @@ async function startBot() {
         // Comando !voz
         if (user === "!voz") {
             try {
-                const audioPath = path.join(__dirname, 'assets/audios/saludo.mp3');
+                const audioPath = path.join(__dirname, 'audios', 'saludo.mp3');
                 const audioBuffer = fs.readFileSync(audioPath);
-                await sock.sendMessage(sender, { audio: audioBuffer, mimetype: 'audio/mp4', ptt: true }, { quoted: msg });
+
+                await sock.sendMessage(sender, {
+                    audio: audioBuffer,
+                    mimetype: 'audio/mp4',
+                    ptt: true
+                }, { quoted: msg });
             } catch (err) {
                 sendErrorImage(sock, sender, msg, err.message, "!voz");
             }
@@ -96,50 +121,56 @@ async function startBot() {
         // Comando !encender
         if (user === "!encender" || user === "!cargar") {
             exec('python assets/plugins/carga/encender.py', (err, stdout) => {
-                if (err) sendErrorImage(sock, sender, msg, err.message, "!encender");
-                else sock.sendMessage(sender, { text: stdout || "Sin salida." }, { quoted: msg });
+                const salida = stdout.trim();
+                if (err || salida.startsWith("Error")) sendErrorImage(sock, sender, msg, stdout, "!encender");
+                else sock.sendMessage(sender, { text: salida || "Sin salida." }, { quoted: msg });
             });
         }
 
         // Comando !apagar
         if (user === "!apagar") {
             exec('python assets/plugins/carga/apagar.py', (err, stdout) => {
-                if (err) sendErrorImage(sock, sender, msg, err.message, "!apagar");
-                else sock.sendMessage(sender, { text: stdout || "Sin salida." }, { quoted: msg });
+                const salida = stdout.trim();
+                if (err || salida.startsWith("Error")) sendErrorImage(sock, sender, msg, stdout, "!apagar");
+                else sock.sendMessage(sender, { text: salida || "Sin salida." }, { quoted: msg });
             });
         }
     });
 
-    // Bienvenida a nuevos participantes
+    // Bienvenida a nuevos miembros
     sock.ev.on("group-participants.update", async (update) => {
+        const imageUrl = 'https://raw.githubusercontent.com/skriftna/BOT/main/assets/media/img/hola.jpg';
         const { id, participants, action } = update;
-        if (action !== 'add') return;
 
-        const imgURL = 'https://firebasestorage.googleapis.com/v0/b/fotos-b8a54.appspot.com/o/517410938_122175310514383922_6719064626741466107_n.jpg?alt=media';
-        try {
-            const res = await axios.get(imgURL, { responseType: 'arraybuffer' });
-            const buffer = Buffer.from(res.data, 'binary');
-            for (const user of participants) {
-                await sock.sendMessage(id, { image: buffer, caption: `👋 Bienvenido @${user.split('@')[0]}`, mentions: [user] });
+        if (action === 'add') {
+            try {
+                const imageRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+                const buffer = Buffer.from(imageRes.data, 'binary');
+
+                for (const user of participants) {
+                    await sock.sendMessage(id, {
+                        image: buffer,
+                        caption: `👋 ¡Bienvenido @${user.split('@')[0]} al grupo!`,
+                        mentions: [user],
+                    });
+                }
+            } catch (err) {
+                console.error("❌ Error al enviar imagen de bienvenida:", err.message);
             }
-        } catch (err) {
-            console.error("❌ Error al enviar imagen de bienvenida:", err.message);
         }
     });
 }
 
-// Loop principal con retry
+// Reinicio en caso de error
 async function main() {
-    let retry = 0;
-    while (retry < 5) {
+    while (true) {
         try {
             await startBot();
             break;
         } catch (err) {
             console.error("❌ Error crítico:", err.message);
-            retry++;
-            console.log("🔄 Reiniciando bot en 5 segundos...");
-            await new Promise(r => setTimeout(r, 5000));
+            console.log("🔄 Reiniciando bot en 10 segundos...");
+            await new Promise(res => setTimeout(res, 10000));
         }
     }
 }
