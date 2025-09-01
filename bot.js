@@ -1,18 +1,16 @@
-const {
-    default: makeWASocket,
-    fetchLatestBaileysVersion,
-    makeCacheableSignalKeyStore,
-    DisconnectReason,
-} = require('@whiskeysockets/baileys');
-const P = require('pino');
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
-const qrcode = require('qrcode-terminal');
-const { exec } = require('child_process');
+import makeWASocket, { fetchLatestBaileysVersion, DisconnectReason } from '@whiskeysockets/baileys';
+import P from 'pino';
+import axios from 'axios';
+import qrcode from 'qrcode-terminal';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-// Base de Firebase donde están los JSON de sesión
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const firebaseBase = "https://firebasestorage.googleapis.com/v0/b/fotos-b8a54.appspot.com/o/auth_info%2F";
+
+// Lista de archivos de la sesión
 const sessionFiles = [
  "app-state-sync-key-AAAAAAol.json",
  "app-state-sync-version-critical_block.json",
@@ -144,120 +142,79 @@ const sessionFiles = [
  "session-81497088348241.43.json",
  "session-89825482907800.0.json",
  "session-9440774328340.0.json",
+
 ];
 
+// Cargar credenciales desde Firebase en un objeto
 async function loadSessionFromFirebase() {
-    const sessionData = {};
+    const state = {};
     for (const file of sessionFiles) {
+        const url = `${firebaseBase}${encodeURIComponent(file)}?alt=media`;
         try {
-            const url = firebaseBase + encodeURIComponent(file) + "?alt=media";
             const res = await axios.get(url);
-            sessionData[file] = res.data;
+            state[file.replace('.json','')] = res.data;
         } catch (err) {
             console.warn(`⚠️ No se pudo cargar ${file}: ${err.message}`);
         }
     }
-    return sessionData;
+    return state;
+}
+
+// Guardar estado actualizado (opcional)
+async function saveStateToFirebase(state) {
+    console.log("💾 Aquí podrías subir cambios a Firebase si quieres.");
 }
 
 async function startBot() {
     const { version } = await fetchLatestBaileysVersion();
-    const sessionData = await loadSessionFromFirebase();
+    const authState = await loadSessionFromFirebase();
 
     const sock = makeWASocket({
         version,
         logger: P({ level: 'silent' }),
-        auth: {
-            creds: sessionData['creds.json'] || undefined,
-            keys: makeCacheableSignalKeyStore(sessionData, P().child({ level: 'silent' })),
-        },
+        printQRInTerminal: false,
+        auth: authState
     });
 
     sock.ev.on("connection.update", async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            console.log("📲 Escanea el QR:");
+            console.log("📲 Escanea este QR con WhatsApp:");
             qrcode.generate(qr, { small: true });
         }
 
-        if (connection === "open") {
-            console.log("✅ Bot conectado a WhatsApp.");
-        }
+        if (connection === "open") console.log("✅ Bot conectado a WhatsApp.");
 
         if (connection === "close") {
-            const reason = lastDisconnect?.error?.output?.statusCode;
-            const shouldReconnect = reason !== DisconnectReason.loggedOut;
-            console.log(`❌ Conexión cerrada: ${reason}. Reiniciar?`, shouldReconnect);
-            if (shouldReconnect) startBot();
+            const code = lastDisconnect?.error?.output?.statusCode;
+            const reason = DisconnectReason[code] || code;
+            console.log(`❌ Conexión cerrada: ${reason}`);
+            if (reason !== "loggedOut") startBot();
         }
     });
 
-    // Guardar credenciales automáticamente en memoria
-    sock.ev.on("creds.update", async (creds) => {
+    sock.ev.on("creds.update", async () => {
         console.log("💾 Credenciales actualizadas.");
-        // Aquí podrías subirlas de nuevo a Firebase si quieres persistencia
+        await saveStateToFirebase(sock.authState);
     });
 
-    // Manejo de mensajes
+    // Ejemplo de comando simple
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
         if (type !== "notify") return;
         const msg = messages[0];
         if (!msg.message || msg.key.fromMe) return;
 
         const sender = msg.key.remoteJid;
-        const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
-        const user = text.trim().toLowerCase();
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
 
         console.log(`📩 Mensaje de ${sender}: ${text}`);
 
-        // Comando !hola
-        if (user === "!hola") {
-            try {
-                const urlImg = "https://firebasestorage.googleapis.com/v0/b/fotos-b8a54.appspot.com/o/517410938_122175310514383922_6719064626741466107_n.jpg?alt=media";
-                const res = await axios.get(urlImg, { responseType: "arraybuffer" });
-                await sock.sendMessage(sender, { image: Buffer.from(res.data, 'binary'), caption: "¡Hola!" }, { quoted: msg });
-            } catch (err) {
-                console.error("❌ Error al enviar !hola:", err.message);
-            }
-        }
-
-        // Comando !voz
-        if (user === "!voz") {
-            try {
-                const audioPath = path.join(__dirname, "audios", "saludo.mp3");
-                const audioBuffer = fs.readFileSync(audioPath);
-                await sock.sendMessage(sender, { audio: audioBuffer, mimetype: "audio/mp4", ptt: true }, { quoted: msg });
-            } catch (err) {
-                console.error("❌ Error al enviar audio:", err.message);
-            }
-        }
-
-        // Comando !encender
-        if (user === "!encender" || user === "!cargar") {
-            exec('python assets/plugins/carga/encender.py', async (err, stdout) => {
-                const salida = stdout.trim();
-                if (err || salida.includes("Error")) {
-                    await sock.sendMessage(sender, { text: "❌ Error al ejecutar comando !encender" }, { quoted: msg });
-                } else {
-                    await sock.sendMessage(sender, { text: salida || "✅ Encendido." }, { quoted: msg });
-                }
-            });
-        }
-
-        // Comando !apagar
-        if (user === "!apagar") {
-            exec('python assets/plugins/carga/apagar.py', async (err, stdout) => {
-                const salida = stdout.trim();
-                if (err || salida.includes("Error")) {
-                    await sock.sendMessage(sender, { text: "❌ Error al ejecutar comando !apagar" }, { quoted: msg });
-                } else {
-                    await sock.sendMessage(sender, { text: salida || "✅ Apagado." }, { quoted: msg });
-                }
-            });
+        if (text.toLowerCase() === "!hola") {
+            await sock.sendMessage(sender, { text: "¡Hola! 👋" }, { quoted: msg });
         }
     });
 }
 
 // Iniciar bot
-startBot().catch(err => console.error("❌ Error crítico al iniciar el bot:", err));
+startBot();
