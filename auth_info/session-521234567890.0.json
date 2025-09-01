@@ -1,0 +1,17 @@
+{
+  "name": "auth_info/session-521234567890.0.json",
+  "bucket": "fotos-b8a54.appspot.com",
+  "generation": "1756693310142013",
+  "metageneration": "1",
+  "contentType": "application/json",
+  "timeCreated": "2025-09-01T02:21:50.199Z",
+  "updated": "2025-09-01T02:21:50.199Z",
+  "storageClass": "STANDARD",
+  "size": "885",
+  "md5Hash": "TmeSMx/cCX2sbm75fqtl+A==",
+  "contentEncoding": "identity",
+  "contentDisposition": "inline; filename*=utf-8''session-521234567890.0.json",
+  "crc32c": "zLL1Xg==",
+  "etag": "CL3s68XAto8DEAE=",
+  "downloadTokens": "52ac3a8b-46fd-4acb-a46a-0f53aee1538d"
+}
