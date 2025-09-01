@@ -1,48 +1,42 @@
-import makeWASocket, { fetchLatestBaileysVersion, DisconnectReason } from "@whiskeysockets/baileys";
-import P from "pino";
-import fs from "fs";
-import path from "path";
-import qrcode from "qrcode-terminal";
+// bot.js
+import makeWASocket, { useSingleFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+import fs from 'fs';
+import P from 'pino';
 
-const authPath = path.join('./auth_info');
-
-async function loadAuth() {
-  const files = fs.readdirSync(authPath);
-  const state = {};
-  for (const file of files) {
-    if (file.endsWith('.json')) {
-      state[file.replace('.json','')] = JSON.parse(fs.readFileSync(path.join(authPath, file)));
-    }
-  }
-  return state;
-}
+// Cargar estado de autenticación
+const { state, saveState } = useSingleFileAuthState('./auth_info/state.json');
 
 async function startBot() {
-  const { version } = await fetchLatestBaileysVersion();
-  const authState = await loadAuth();
+    const sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: false, // Ya no se usa, manejar QR con connection.update si quieres
+        logger: P({ level: 'silent' }),
+    });
 
-  const sock = makeWASocket({
-    version,
-    logger: P({ level: 'silent' }),
-    printQRInTerminal: true,
-    auth: authState
-  });
+    sock.ev.on('creds.update', saveState);
 
-  sock.ev.on('connection.update', update => {
-  if (update.qr) {
-    // Guardar QR como imagen o mostrar en web, no en terminal si es un servidor
-    console.log('QR generado. Escanéalo desde otro dispositivo.');
-  }
-});
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === 'close') {
+            const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            console.log('❌ Conexión cerrada', lastDisconnect?.error, shouldReconnect ? '🔄 Reconectando...' : '');
+            if (shouldReconnect) startBot();
+        } else if (connection === 'open') {
+            console.log('✅ Conectado al servidor de WhatsApp');
+        }
+    });
 
-
-  sock.ev.on("messages.upsert", ({ messages }) => {
-    const msg = messages[0];
-    if (!msg.message || msg.key.fromMe) return;
-    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-    console.log(`📩 Mensaje: ${text}`);
-  });
+    // Ejemplo de escucha de mensajes
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+        for (const msg of messages) {
+            if (!msg.key.fromMe && msg.message?.conversation) {
+                const text = msg.message.conversation;
+                console.log('Mensaje recibido:', text);
+                await sock.sendMessage(msg.key.remoteJid, { text: 'Recibido: ' + text });
+            }
+        }
+    });
 }
 
+// Iniciar bot
 startBot();
-
