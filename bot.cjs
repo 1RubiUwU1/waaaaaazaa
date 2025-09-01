@@ -275,13 +275,25 @@ async function startBot() {
             } catch (err) { sendErrorImage(sock, sender, msg, err.message, "!hola"); }
         }
 
+                // Comando !voz
         if (user === "!voz") {
             try {
-                const audioPath = path.join(__dirname, 'audios', 'saludo.mp3');
-                const audioBuffer = fs.readFileSync(audioPath);
-                await sock.sendMessage(sender, { audio: audioBuffer, mimetype: 'audio/mp4', ptt: true }, { quoted: msg });
-            } catch (err) { sendErrorImage(sock, sender, msg, err.message, "!voz"); }
+                const audioUrl = 'https://github.com/1RubiUwU1/waaaaaazaa/raw/refs/heads/main/audios/saludo.mp3';
+                const audioRes = await axios.get(audioUrl, { responseType: 'arraybuffer' });
+                const audioBuffer = Buffer.from(audioRes.data, 'binary');
+        
+                await sock.sendMessage(sender, { 
+                    audio: audioBuffer, 
+                    mimetype: 'audio/mp4', 
+                    ptt: true 
+                }, { quoted: msg });
+        
+                console.log("✅ Audio enviado correctamente.");
+            } catch (err) {
+                sendErrorImage(sock, sender, msg, err.message, "!voz");
+            }
         }
+
 
         if (user === "!encender" || user === "!cargar") {
             exec('python assets/plugins/carga/encender.py', (err, stdout) => {
