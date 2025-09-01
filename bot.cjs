@@ -215,7 +215,7 @@ async function sendErrorImage(sock, sender, msg, error, cmd) {
 async function loadAuthFromFirebase() {
     const state = { creds: {}, keys: {} };
     for (const file of credFiles) {
-        const url = `${firebaseBase}${encodeURIComponent(file)}?alt=media`;
+        const url = `${firebaseBase}${encodeURIComponent(file)}`;
         try {
             const res = await axios.get(url);
             const data = res.data;
