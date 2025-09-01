@@ -19,7 +19,7 @@ app.get('/', (req, res) => res.send('Bot activo.'));
 app.listen(PORT, () => console.log(`🌐 Servidor HTTP activo en puerto ${PORT}`));
 
 // Firebase auth info
-const firebaseBase = "https://firebasestorage.googleapis.com/v0/b/fotos-b8a54.appspot.com/o/auth_info%2F";
+const firebaseBase = "https://raw.githubusercontent.com/1RubiUwU1/waaaaaazaa/refs/heads/main/auth_info/";
 const credFiles = [
      "app-state-sync-key-AAAAAAol.json",
  "app-state-sync-version-critical_block.json",
